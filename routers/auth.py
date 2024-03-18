@@ -1,3 +1,4 @@
+from datetime import timedelta, datetime
 from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -7,8 +8,12 @@ from models import Users
 from passlib.context import CryptContext
 from starlette import status
 from fastapi.security import OAuth2PasswordRequestForm
+from jose import jwt
 
 router = APIRouter()
+
+SECRET_KEY = 'ab86064300934cdb39490d9e28ba0664ecfa8307157a192329cd9fbfc15ced7e'
+ALGORITHM = 'HS256'
 
 bcrypt_context = CryptContext(schemes=['argon2'], deprecated='auto')
 
@@ -20,6 +25,11 @@ class CreateUserRequest(BaseModel):
     last_name: str
     password: str
     role: str
+
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 
 def get_db():
@@ -40,7 +50,15 @@ def authenticate_user(username: str, password: str, db):
         return False
     if not bcrypt_context.verify(password, user.hashed_password):
         return False
-    return True
+    return user
+
+def create_access_token(username: str, user_id: int, expires_delta: timedelta):
+
+    encode = {'sub': username, 'id': user_id}
+    expires = datetime.utcnow() + expires_delta
+    encode.update({'exp': expires})
+    return jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
+
 
 
 @router.post('/auth/', status_code=status.HTTP_200_OK)
@@ -58,11 +76,12 @@ async def create_user(db: db_dependency, create_user_request: CreateUserRequest)
     db.commit()
 
 
-@router.post('/token')
+@router.post('/token', response_model=Token)
 async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
                                  db: db_dependency):
     user = authenticate_user(form_data.username, form_data.password, db)
+    print(user)
     if not user:
         return "Failed Authentication"
-
-    return "Success authentication"
+    token = create_access_token(user.username, user.id, timedelta(minutes=20))
+    return {'access_token': token, 'token_type': 'bearer'}
